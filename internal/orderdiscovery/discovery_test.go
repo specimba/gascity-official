@@ -723,6 +723,58 @@ interval = "5m"
 	}
 }
 
+func TestBuildSuspendedSet(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *config.City
+		wantSusp map[string]struct{}
+	}{
+		{
+			name:     "nil config returns empty set",
+			cfg:      nil,
+			wantSusp: map[string]struct{}{},
+		},
+		{
+			name: "no suspended rigs returns empty set",
+			cfg: &config.City{
+				Rigs: []config.Rig{
+					{Name: "active-1", Suspended: false},
+					{Name: "active-2", Suspended: false},
+				},
+			},
+			wantSusp: map[string]struct{}{},
+		},
+		{
+			name: "suspended rigs are in set",
+			cfg: &config.City{
+				Rigs: []config.Rig{
+					{Name: "active-1", Suspended: false},
+					{Name: "suspend-me", Suspended: true},
+					{Name: "active-2", Suspended: false},
+					{Name: "suspend-me-too", Suspended: true},
+				},
+			},
+			wantSusp: map[string]struct{}{
+				"suspend-me":     {},
+				"suspend-me-too": {},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildSuspendedSet(tt.cfg)
+			if len(got) != len(tt.wantSusp) {
+				t.Fatalf("got %d suspended rigs, want %d", len(got), len(tt.wantSusp))
+			}
+			for name := range tt.wantSusp {
+				if _, ok := got[name]; !ok {
+					t.Fatalf("suspended rig %q not in set", name)
+				}
+			}
+		})
+	}
+}
+
 func writeOrderDiscoveryFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

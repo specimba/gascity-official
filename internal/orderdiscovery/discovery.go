@@ -12,18 +12,19 @@ import (
 	"github.com/gastownhall/gascity/internal/orders"
 )
 
-// isRigSuspended reports whether the named rig is marked suspended in config.
-// A nil config or missing rig is treated as active.
-func isRigSuspended(cfg *config.City, rigName string) bool {
-	if cfg == nil || rigName == "" {
-		return false
+// buildSuspendedSet returns a set of rig names that are marked suspended.
+// This is O(rigs) instead of O(rigs^2) when called inside the rig loop.
+func buildSuspendedSet(cfg *config.City) map[string]struct{} {
+	suspended := make(map[string]struct{})
+	if cfg == nil {
+		return suspended
 	}
 	for _, r := range cfg.Rigs {
-		if r.Name == rigName {
-			return r.Suspended
+		if r.Suspended {
+			suspended[r.Name] = struct{}{}
 		}
 	}
-	return false
+	return suspended
 }
 
 // RigScanErrorHandler handles a failed rig-exclusive order scan.
@@ -68,9 +69,11 @@ func ScanAll(cityPath string, cfg *config.City, opts ScanOptions) ([]orders.Orde
 		rigNames[rigName] = struct{}{}
 	}
 
+	suspended := buildSuspendedSet(cfg)
+
 	var rigOrders []orders.Order
 	for _, rigName := range sortedRigNames(rigNames) {
-		if isRigSuspended(cfg, rigName) {
+		if _, isSuspended := suspended[rigName]; isSuspended {
 			continue
 		}
 		exclusive := RigExclusiveLayers(cfg.FormulaLayers.Rigs[rigName], cityLayers)
