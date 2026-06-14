@@ -12,6 +12,20 @@ import (
 	"github.com/gastownhall/gascity/internal/orders"
 )
 
+// isRigSuspended reports whether the named rig is marked suspended in config.
+// A nil config or missing rig is treated as active.
+func isRigSuspended(cfg *config.City, rigName string) bool {
+	if cfg == nil || rigName == "" {
+		return false
+	}
+	for _, r := range cfg.Rigs {
+		if r.Name == rigName {
+			return r.Suspended
+		}
+	}
+	return false
+}
+
 // RigScanErrorHandler handles a failed rig-exclusive order scan.
 // Returning nil skips that rig and continues scanning remaining rigs.
 type RigScanErrorHandler func(rigName string, err error) error
@@ -56,6 +70,9 @@ func ScanAll(cityPath string, cfg *config.City, opts ScanOptions) ([]orders.Orde
 
 	var rigOrders []orders.Order
 	for _, rigName := range sortedRigNames(rigNames) {
+		if isRigSuspended(cfg, rigName) {
+			continue
+		}
 		exclusive := RigExclusiveLayers(cfg.FormulaLayers.Rigs[rigName], cityLayers)
 		exclusivePackDirs := cfg.RigPackDirs[rigName]
 		if len(exclusive) == 0 && len(exclusivePackDirs) == 0 {

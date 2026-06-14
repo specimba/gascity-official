@@ -577,6 +577,152 @@ func orderDiscoveryPackLayer(t *testing.T, packName string) (packDir, layer stri
 	return packDir, layer
 }
 
+func TestScanAllSkipsSuspendedRig(t *testing.T) {
+	cityPath, cityLayer := orderDiscoveryCity(t)
+	rigLayer := orderDiscoveryRigLayer(t, "suspended-rig")
+	writeOrderDiscoveryFile(t, filepath.Join(filepath.Dir(rigLayer), "orders"), "patrol", `[order]
+exec = "scripts/patrol.sh"
+trigger = "cooldown"
+interval = "5m"
+`)
+
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{cityLayer},
+			Rigs: map[string][]string{
+				"suspended-rig": {cityLayer, rigLayer},
+			},
+		},
+		Rigs: []config.Rig{
+			{Name: "suspended-rig", FormulasDir: rigLayer, Suspended: true},
+		},
+	}
+
+	aa, err := ScanAll(cityPath, cfg, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanAll returned error: %v", err)
+	}
+	for _, a := range aa {
+		if a.Rig == "suspended-rig" {
+			t.Fatalf("suspended rig order discovered: %#v", a)
+		}
+	}
+}
+
+func TestScanAllActiveRigStillReceivesOrders(t *testing.T) {
+	cityPath, cityLayer := orderDiscoveryCity(t)
+	rigLayer := orderDiscoveryRigLayer(t, "active-rig")
+	writeOrderDiscoveryFile(t, filepath.Join(filepath.Dir(rigLayer), "orders"), "patrol", `[order]
+exec = "scripts/patrol.sh"
+trigger = "cooldown"
+interval = "5m"
+`)
+
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{cityLayer},
+			Rigs: map[string][]string{
+				"active-rig": {cityLayer, rigLayer},
+			},
+		},
+		Rigs: []config.Rig{
+			{Name: "active-rig", FormulasDir: rigLayer, Suspended: false},
+		},
+	}
+
+	aa, err := ScanAll(cityPath, cfg, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanAll returned error: %v", err)
+	}
+	found := false
+	for _, a := range aa {
+		if a.Name == "patrol" && a.Rig == "active-rig" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("active rig patrol order not discovered in %#v", aa)
+	}
+}
+
+func TestScanAllSuspendsRigWithNoAgentsOrCodebase(t *testing.T) {
+	cityPath, cityLayer := orderDiscoveryCity(t)
+	rigLayer := orderDiscoveryRigLayer(t, "empty-rig")
+
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{cityLayer},
+			Rigs: map[string][]string{
+				"empty-rig": {cityLayer, rigLayer},
+			},
+		},
+		Rigs: []config.Rig{
+			{Name: "empty-rig", FormulasDir: rigLayer, Suspended: true},
+		},
+	}
+
+	aa, err := ScanAll(cityPath, cfg, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanAll returned error: %v", err)
+	}
+	for _, a := range aa {
+		if a.Rig == "empty-rig" {
+			t.Fatalf("suspended empty rig produced orders: %#v", a)
+		}
+	}
+}
+
+func TestScanAllSuspendedRigMixedWithActiveRigs(t *testing.T) {
+	cityPath, cityLayer := orderDiscoveryCity(t)
+	suspendedLayer := orderDiscoveryRigLayer(t, "suspended-rig")
+	activeLayer := orderDiscoveryRigLayer(t, "active-rig")
+	writeOrderDiscoveryFile(t, filepath.Join(filepath.Dir(suspendedLayer), "orders"), "susp-order", `[order]
+exec = "scripts/s.sh"
+trigger = "cooldown"
+interval = "5m"
+`)
+
+	writeOrderDiscoveryFile(t, filepath.Join(filepath.Dir(activeLayer), "orders"), "act-order", `[order]
+exec = "scripts/a.sh"
+trigger = "cooldown"
+interval = "5m"
+`)
+
+	cfg := &config.City{
+		FormulaLayers: config.FormulaLayers{
+			City: []string{cityLayer},
+			Rigs: map[string][]string{
+				"suspended-rig": {cityLayer, suspendedLayer},
+				"active-rig":     {cityLayer, activeLayer},
+			},
+		},
+		Rigs: []config.Rig{
+			{Name: "suspended-rig", FormulasDir: suspendedLayer, Suspended: true},
+			{Name: "active-rig", FormulasDir: activeLayer, Suspended: false},
+		},
+	}
+
+	aa, err := ScanAll(cityPath, cfg, ScanOptions{})
+	if err != nil {
+		t.Fatalf("ScanAll returned error: %v", err)
+	}
+	var suspendedFound, activeFound bool
+	for _, a := range aa {
+		switch a.Rig {
+		case "suspended-rig":
+			suspendedFound = true
+		case "active-rig":
+			activeFound = true
+		}
+	}
+	if suspendedFound {
+		t.Fatalf("suspended rig orders should be skipped, got: %#v", aa)
+	}
+	if !activeFound {
+		t.Fatalf("active rig orders should still be discovered, got: %#v", aa)
+	}
+}
+
 func writeOrderDiscoveryFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
